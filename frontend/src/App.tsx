@@ -17,16 +17,40 @@ function App() {
     y: number;
   } | null>(null);
 
-  const [isEyedropperActive, setIsEyedropperActive] = useState(false);
+  const [camera, setCamera] = useState({
+    x: 0,
+    y: 0,
+    zoom: 1,
+  });
 
-  // State to track the position of the color picker and whether it's open
-  const [pickerPosition, setPickerPosition] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    didDrag: boolean;
+    startMouseX: number;
+    startMouseY: number;
+    startCameraX: number;
+    startCameraY: number;
+  }>({
+    isDragging: false,
+    didDrag: false,
+    startMouseX: 0,
+    startMouseY: 0,
+    startCameraX: 0,
+    startCameraY: 0,
+  });
+
+  const [isEyedropperActive, setIsEyedropperActive] = useState(false);
 
   // State to track the board's cell colors
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+
+  const pickerPosition =
+    selectedCell && isPickerOpen
+      ? {
+          x: selectedCell.x * CELL_SIZE * camera.zoom + camera.x,
+          y: selectedCell.y * CELL_SIZE * camera.zoom + camera.y,
+        }
+      : null;
 
   // The board state is a 2D array representing the colors of each cell on the board. Each cell can either be null (indicating no color) or a string representing the color.
   // Effectively, this chunk of code initializes the board state as a 2D array of null values, with dimensions defined by BOARD_HEIGHT and BOARD_WIDTH. This represents an empty board where no cells have been colored yet.
@@ -55,6 +79,121 @@ function App() {
     },
     [board, selectedColor, selectedCell, isPickerOpen],
   );
+
+  const clampCamera = useCallback(
+    (nextCamera: { x: number; y: number; zoom: number }) => {
+      const boardPixelWidth = BOARD_WIDTH * CELL_SIZE * nextCamera.zoom;
+      const boardPixelHeight = BOARD_HEIGHT * CELL_SIZE * nextCamera.zoom;
+
+      const canvasWidth = BOARD_WIDTH * CELL_SIZE;
+      const canvasHeight = BOARD_HEIGHT * CELL_SIZE;
+
+      const minX = Math.min(0, canvasWidth - boardPixelWidth);
+      const minY = Math.min(0, canvasHeight - boardPixelHeight);
+
+      const maxX = 0;
+      const maxY = 0;
+
+      return {
+        ...nextCamera,
+        x: Math.max(minX, Math.min(maxX, nextCamera.x)),
+        y: Math.max(minY, Math.min(maxY, nextCamera.y)),
+      };
+    },
+    [],
+  );
+
+  const handleCanvasWheel = useCallback(
+    (event: WheelEvent) => {
+      event.preventDefault();
+
+      const rect = (
+        event.currentTarget as HTMLCanvasElement
+      ).getBoundingClientRect();
+
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      setCamera((prevCamera) => {
+        const zoomSensitivity = 0.0015;
+        const zoomAmount = -event.deltaY * zoomSensitivity;
+
+        const nextZoom = Math.max(
+          0.5,
+          Math.min(8, prevCamera.zoom + zoomAmount),
+        );
+
+        const zoomRatio = nextZoom / prevCamera.zoom;
+
+        const newCameraX = mouseX - (mouseX - prevCamera.x) * zoomRatio;
+        const newCameraY = mouseY - (mouseY - prevCamera.y) * zoomRatio;
+
+        return clampCamera({
+          zoom: nextZoom,
+          x: newCameraX,
+          y: newCameraY,
+        });
+      });
+    },
+    [clampCamera],
+  );
+
+  const handleCanvasMouseDown = useCallback(
+    (event: MouseEvent) => {
+      if (isPickerOpen) return;
+
+      dragStateRef.current = {
+        isDragging: true,
+        didDrag: false,
+        startMouseX: event.clientX,
+        startMouseY: event.clientY,
+        startCameraX: camera.x,
+        startCameraY: camera.y,
+      };
+    },
+    [camera.x, camera.y, isPickerOpen],
+  );
+
+  const handleWindowMouseMove = useCallback(
+    (event: MouseEvent) => {
+      const dragState = dragStateRef.current;
+
+      if (!dragState.isDragging) return;
+
+      const deltaX = event.clientX - dragState.startMouseX;
+      const deltaY = event.clientY - dragState.startMouseY;
+
+      const dragThreshold = 5;
+
+      if (!dragState.didDrag) {
+        if (
+          Math.abs(deltaX) < dragThreshold &&
+          Math.abs(deltaY) < dragThreshold
+        ) {
+          return;
+        }
+
+        dragStateRef.current.didDrag = true;
+      }
+
+      if (!dragState.didDrag) {
+        dragStateRef.current.didDrag = true;
+      }
+
+      setCamera((prevCamera) =>
+        clampCamera({
+          x: dragState.startCameraX + deltaX,
+          y: dragState.startCameraY + deltaY,
+          zoom: prevCamera.zoom,
+        }),
+      );
+    },
+    [clampCamera],
+  );
+
+  const handleWindowMouseUp = useCallback(() => {
+    dragStateRef.current.isDragging = false;
+  }, []);
 
   // The function to handle canceling the edit when the user clicks outside the picker or presses the Escape key. It closes the color picker and clears the selected cell state, returning the app to its default state.
   function handleCancelEdit() {
@@ -94,6 +233,8 @@ function App() {
     if (!ctx) return;
     // We add a ! after every use of ctx and canvas beyond this point to tell TypeScript that we are sure these variables are not null, since we have already checked for that. This allows us to use the canvas and context without needing to check for null every time, which simplifies the code and makes it more readable.
 
+    const scaledCellSize = CELL_SIZE * camera.zoom;
+
     // This variable tracks the currently hovered cell for displaying the hover effect. It is not stored in React state because it does not need to trigger a re-render of the component; instead, we will handle the hover effect directly in the canvas rendering logic.
     // The ending part of | null = null; | indicates that this variable can either hold an object with x and y coordinates or be null when no cell is hovered. This allows us to easily check if there is a hovered cell and render the appropriate hover effect on the canvas without needing to manage this state through React's rendering cycle, which can improve performance for hover interactions.
     let hoveredCell: { x: number; y: number } | null = null;
@@ -109,7 +250,12 @@ function App() {
     function drawCell(x: number, y: number, color: string) {
       ctx!.fillStyle = color;
       // We multiply the cell coordinates by the cell size to get the correct pixel position on the canvas, and then fill a rectangle of the defined cell size to represent the cell's color. This is where the actual drawing of each cell happens based on the board state.
-      ctx!.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      ctx!.fillRect(
+        x * scaledCellSize + camera.x,
+        y * scaledCellSize + camera.y,
+        scaledCellSize,
+        scaledCellSize,
+      );
     }
 
     // This function draws a border around the hovered or selected cell to provide visual feedback to the user.
@@ -119,10 +265,10 @@ function App() {
       ctx!.lineWidth = 1;
       // We add 0.5 to the coordinates to ensure the border is drawn crisply on pixel boundaries, which helps avoid blurriness due to anti-aliasing when drawing thin lines on a canvas.
       ctx!.strokeRect(
-        x * CELL_SIZE + 0.5,
-        y * CELL_SIZE + 0.5,
-        CELL_SIZE - 1,
-        CELL_SIZE - 1,
+        x * scaledCellSize + 0.5 + camera.x,
+        y * scaledCellSize + 0.5 + camera.y,
+        scaledCellSize - 1,
+        scaledCellSize - 1,
       );
     }
 
@@ -177,25 +323,32 @@ function App() {
 
     //
     function getCellFromMouse(event: MouseEvent) {
-      // Get the bounding rectangle of the canvas to calculate the mouse position relative to the canvas. This is necessary because the canvas may not be positioned at the top-left corner of the page, and we need to account for any offsets when determining which cell is being interacted with.
       const rect = canvas!.getBoundingClientRect();
-      // The amount we offset the cell we're actually detecting from the mouse, this way the cursor doesn't cover the cell you want to select.
       const hoverOffset = 4;
 
-      // Calculate the mouse position relative to the canvas, adjusting for the hover offset to ensure the correct cell is detected even when the mouse is near the edge of a cell. This allows for a more user-friendly experience when hovering and clicking on cells.
       const mouseX = event.clientX - rect.left - hoverOffset;
       const mouseY = event.clientY - rect.top - hoverOffset;
 
-      // Calculate the cell coordinates based on the mouse position and cell size. We use Math.floor to determine which cell the mouse is over, and Math.max to ensure we don't get negative coordinates if the mouse is near the top-left edge of the canvas.
-      const cellX = Math.max(0, Math.floor(mouseX / CELL_SIZE));
-      const cellY = Math.max(0, Math.floor(mouseY / CELL_SIZE));
+      const scaledCellSize = CELL_SIZE * camera.zoom;
 
-      // Ensure the cell coordinates are within the bounds of the board
+      const cellX = Math.max(
+        0,
+        Math.floor((mouseX - camera.x) / scaledCellSize),
+      );
+      const cellY = Math.max(
+        0,
+        Math.floor((mouseY - camera.y) / scaledCellSize),
+      );
+
       return { x: cellX, y: cellY };
     }
 
     // When the canvas is clicked, we want to open the color picker for the cell that was clicked. This function handles the logic for determining which cell was clicked and setting the appropriate state to show the color picker.
     function handleCanvasClick(event: MouseEvent) {
+      if (dragStateRef.current.didDrag) {
+        dragStateRef.current.didDrag = false;
+        return;
+      }
       const clickedCell = getCellFromMouse(event);
 
       if (isPickerOpen && isEyedropperActive) {
@@ -213,14 +366,7 @@ function App() {
         return;
       }
 
-      const rect = canvas!.getBoundingClientRect();
-
       setSelectedCell(clickedCell);
-
-      setPickerPosition({
-        x: event.clientX - rect.left - 232,
-        y: event.clientY - rect.top + 125,
-      });
 
       setIsPickerOpen(true);
     }
@@ -263,17 +409,25 @@ function App() {
     renderBoard();
 
     // Add event listeners for canvas interactions and keyboard input
+    canvas.addEventListener("wheel", handleCanvasWheel, { passive: false });
     canvas.addEventListener("click", handleCanvasClick);
     canvas.addEventListener("mousemove", handleCanvasMouseMove);
     canvas.addEventListener("mouseleave", handleCanvasMouseLeave);
     window.addEventListener("keydown", handleKeyDown);
+    canvas.addEventListener("mousedown", handleCanvasMouseDown);
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
 
     // Cleanup event listeners on unmount
     return () => {
+      canvas.removeEventListener("wheel", handleCanvasWheel);
       canvas.removeEventListener("click", handleCanvasClick);
       canvas.removeEventListener("mousemove", handleCanvasMouseMove);
       canvas.removeEventListener("mouseleave", handleCanvasMouseLeave);
       window.removeEventListener("keydown", handleKeyDown);
+      canvas.removeEventListener("mousedown", handleCanvasMouseDown);
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
     };
 
     // The dependencies of this effect include the board state, the selected color, the selected cell, and whether the picker is open. Whenever any of these change, the effect will re-run and update the canvas rendering accordingly. This ensures that the UI stays in sync with the current state of the application.
@@ -284,6 +438,11 @@ function App() {
     isPickerOpen,
     isEyedropperActive,
     getDisplayedCellColor,
+    camera,
+    handleCanvasWheel,
+    handleCanvasMouseDown,
+    handleWindowMouseMove,
+    handleWindowMouseUp,
   ]);
 
   // The main render function of the React component; essentially the whole UI structure of the app.
@@ -302,8 +461,8 @@ function App() {
           style={{
             position: "absolute",
             overflow: "visible",
-            left: `${pickerPosition.x}px`,
-            top: `${pickerPosition.y}px`,
+            left: `${pickerPosition.x - 225 - CELL_SIZE * 2 * camera.zoom}px`,
+            top: `${pickerPosition.y + 130}px`,
             backgroundColor: "white",
             border: "1px solid #b0a6a6",
             padding: "8px",
