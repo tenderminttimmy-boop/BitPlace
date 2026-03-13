@@ -17,12 +17,33 @@
   border-radius: 5px;
 }
 
+.utility-button:hover {
+  outline: 0;
+  box-shadow: inset 0 0 5px 20px #ffffff09;
+}
+
+.utility-button:focus {
+  outline: 0;
+  box-shadow: inset 0 0 10px #0000003e;
+}
+
+.utility-button:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 10px #0000003e;
+}
+
 .chrome-picker input {
   color: #ffffff !important;
 }
 
 .chrome-picker label {
   color: #262626 !important;
+}
+
+.active-tool {
+  box-shadow:
+    inset 0 0 0 1px #ffffff80,
+    inset 0 0 8px 3px #ffffff98 !important;
 }
 
 .board-canvas {

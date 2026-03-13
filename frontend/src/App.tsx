@@ -1,5 +1,5 @@
 import "./App.css";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { ChromePicker } from "react-color";
 import { Pipette, X } from "lucide-react";
 
@@ -16,6 +16,8 @@ function App() {
     x: number;
     y: number;
   } | null>(null);
+
+  const [isEyedropperActive, setIsEyedropperActive] = useState(false);
 
   // State to track the position of the color picker and whether it's open
   const [pickerPosition, setPickerPosition] = useState<{
@@ -38,10 +40,27 @@ function App() {
   // State to track the currently selected color in the color picker. This is used to update the preview of the cell being edited and to apply the new color when the user confirms their selection.
   const [selectedColor, setSelectedColor] = useState("black");
 
+  const getDisplayedCellColor = useCallback(
+    (x: number, y: number) => {
+      if (
+        selectedCell &&
+        isPickerOpen &&
+        x === selectedCell.x &&
+        y === selectedCell.y
+      ) {
+        return selectedColor;
+      }
+
+      return board[y][x] ?? "#ffffff";
+    },
+    [board, selectedColor, selectedCell, isPickerOpen],
+  );
+
   // The function to handle canceling the edit when the user clicks outside the picker or presses the Escape key. It closes the color picker and clears the selected cell state, returning the app to its default state.
   function handleCancelEdit() {
     setIsPickerOpen(false);
     setSelectedCell(null);
+    setIsEyedropperActive(false);
   }
 
   // The function that applies the selected color to the selected cell in the board state, both when previewing the color in the picker and when confirming the change.
@@ -147,7 +166,9 @@ function App() {
       }
 
       // Draw hover effect if a cell is hovered or selected
-      if (selectedCell) {
+      if (isPickerOpen && isEyedropperActive && hoveredCell) {
+        drawHoveredCellBorder(hoveredCell.x, hoveredCell.y);
+      } else if (selectedCell) {
         drawHoveredCellBorder(selectedCell.x, selectedCell.y);
       } else if (hoveredCell) {
         drawHoveredCellBorder(hoveredCell.x, hoveredCell.y);
@@ -175,34 +196,60 @@ function App() {
 
     // When the canvas is clicked, we want to open the color picker for the cell that was clicked. This function handles the logic for determining which cell was clicked and setting the appropriate state to show the color picker.
     function handleCanvasClick(event: MouseEvent) {
-      // If the color picker is already open, we want to close it and cancel the current edit. This allows the user to click outside the picker to dismiss it without applying changes.
+      const clickedCell = getCellFromMouse(event);
+
+      if (isPickerOpen && isEyedropperActive) {
+        const sampledColor = getDisplayedCellColor(
+          clickedCell.x,
+          clickedCell.y,
+        );
+        setSelectedColor(sampledColor);
+        setIsEyedropperActive(false);
+        return;
+      }
+
       if (isPickerOpen) {
         handleCancelEdit();
         return;
       }
 
-      // Get the cell coordinates from the mouse click position. This function calculates which cell was clicked based on the mouse position relative to the canvas and the defined cell size.
-      const clickedCell = getCellFromMouse(event);
-
-      // Get the bounding rectangle of the canvas to calculate the correct position for the color picker. This ensures that the picker appears near the clicked cell, even if the canvas is not at the top-left corner of the page.
       const rect = canvas!.getBoundingClientRect();
 
-      // Set the selected cell to the one that was clicked, which will trigger the color picker to open and show the current color of that cell.
       setSelectedCell(clickedCell);
 
-      // Position the color picker near the clicked cell, with a small offset to avoid covering the cell itself
       setPickerPosition({
         x: event.clientX - rect.left - 232,
         y: event.clientY - rect.top + 125,
       });
 
-      // Open the color picker when a cell is clicked
       setIsPickerOpen(true);
     }
 
     // When the mouse moves over the canvas, we want to update the hovered cell state so that we can show a hover effect on the cell under the mouse cursor.
     function handleCanvasMouseMove(event: MouseEvent) {
-      hoveredCell = getCellFromMouse(event);
+      const nextHoveredCell = getCellFromMouse(event);
+
+      if (
+        hoveredCell &&
+        hoveredCell.x === nextHoveredCell.x &&
+        hoveredCell.y === nextHoveredCell.y
+      ) {
+        return;
+      }
+
+      hoveredCell = nextHoveredCell;
+
+      if (isPickerOpen && isEyedropperActive) {
+        const sampledColor = getDisplayedCellColor(
+          hoveredCell.x,
+          hoveredCell.y,
+        );
+
+        if (sampledColor !== selectedColor) {
+          setSelectedColor(sampledColor);
+        }
+      }
+
       renderBoard();
     }
 
@@ -230,7 +277,14 @@ function App() {
     };
 
     // The dependencies of this effect include the board state, the selected color, the selected cell, and whether the picker is open. Whenever any of these change, the effect will re-run and update the canvas rendering accordingly. This ensures that the UI stays in sync with the current state of the application.
-  }, [board, selectedColor, selectedCell, isPickerOpen]);
+  }, [
+    board,
+    selectedColor,
+    selectedCell,
+    isPickerOpen,
+    isEyedropperActive,
+    getDisplayedCellColor,
+  ]);
 
   // The main render function of the React component; essentially the whole UI structure of the app.
   return (
@@ -273,23 +327,21 @@ function App() {
             }}
           >
             <button
-              className="utility-button"
+              className={`utility-button${isEyedropperActive ? " active-tool" : ""}`}
+              onClick={() => setIsEyedropperActive(!isEyedropperActive)}
               style={{
-                backgroundColor: "blue",
+                backgroundColor: "#1756d5",
               }}
             >
               <Pipette size={18} />
             </button>
 
             <button
+              className="utility-button"
               style={{
                 // flex: 1 is equivilent to "fill width" in figma.
                 flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: "green",
-                borderRadius: "5px",
+                backgroundColor: "#19d22b",
               }}
               onClick={handleApplyColor}
             >
@@ -299,7 +351,7 @@ function App() {
             <button
               className="utility-button"
               style={{
-                backgroundColor: "red",
+                backgroundColor: "#cc1a1a",
               }}
               onClick={handleCancelEdit}
             >
