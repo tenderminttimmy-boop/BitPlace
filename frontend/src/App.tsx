@@ -1,7 +1,9 @@
 import "./App.css";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChromePicker } from "react-color";
 import { Pipette, X } from "lucide-react";
+import walletDisconnectedIcon from "./assets/disconnected.svg";
+import walletConnectedIcon from "./assets/connected.svg";
 import {
   drawCell,
   drawHoveredCellBorder,
@@ -11,6 +13,33 @@ import {
 const BOARD_WIDTH = 510;
 const BOARD_HEIGHT = 300;
 const CELL_SIZE = 5;
+const POPUP_WIDTH = 244;
+const POPUP_HEIGHT = 312;
+
+type CellPosition = {
+  x: number;
+  y: number;
+};
+
+type Camera = {
+  x: number;
+  y: number;
+  zoom: number;
+};
+
+type DragState = {
+  isDragging: boolean;
+  didDrag: boolean;
+  startMouseX: number;
+  startMouseY: number;
+  startCameraX: number;
+  startCameraY: number;
+};
+
+type Viewport = {
+  width: number;
+  height: number;
+};
 
 const getBoardWorldWidth = () => BOARD_WIDTH * CELL_SIZE;
 const getBoardWorldHeight = () => BOARD_HEIGHT * CELL_SIZE;
@@ -38,12 +67,14 @@ const getCenteredCamera = (
 };
 
 function App() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [board, setBoard] = useState<(string | null)[][]>(() =>
+    Array.from({ length: BOARD_HEIGHT }, () =>
+      Array.from({ length: BOARD_WIDTH }, () => null),
+    ),
+  );
 
-  const [selectedCell, setSelectedCell] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
+  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [isWalletButtonHovered, setIsWalletButtonHovered] = useState(false);
 
   const [camera, setCamera] = useState(() => {
     const initialZoom = getMinZoom(window.innerWidth, window.innerHeight) * 1.3;
@@ -54,14 +85,24 @@ function App() {
     );
   });
 
-  const dragStateRef = useRef<{
-    isDragging: boolean;
-    didDrag: boolean;
-    startMouseX: number;
-    startMouseY: number;
-    startCameraX: number;
-    startCameraY: number;
-  }>({
+  const [viewport, setViewport] = useState<Viewport>(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  const [canvasRect, setCanvasRect] = useState<DOMRect | null>(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [isEyedropperActive, setIsEyedropperActive] = useState(false);
+  const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
+  const [selectedColor, setSelectedColor] = useState("black");
+
+  const viewportRef = useRef(viewport);
+  const renderBoardRef = useRef<(() => void) | null>(null);
+  const selectedCellRef = useRef(selectedCell);
+  const selectedColorRef = useRef(selectedColor);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hoveredCellRef = useRef<CellPosition | null>(null);
+  const cameraRef = useRef(camera);
+  const dragStateRef = useRef<DragState>({
     isDragging: false,
     didDrag: false,
     startMouseX: 0,
@@ -70,91 +111,65 @@ function App() {
     startCameraY: 0,
   });
 
-  const [viewport, setViewport] = useState(() => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }));
+  const isPickerOpenRef = useRef(isPickerOpen);
+  const isEyedropperActiveRef = useRef(isEyedropperActive);
 
-  const [canvasRect, setCanvasRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  useEffect(() => {
+    selectedCellRef.current = selectedCell;
+  }, [selectedCell]);
+
+  useEffect(() => {
+    selectedColorRef.current = selectedColor;
+  }, [selectedColor]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    const rect = canvasRef.current.getBoundingClientRect();
-    setCanvasRect(rect);
+    setCanvasRect(canvasRef.current.getBoundingClientRect());
   }, []);
 
-  const [isEyedropperActive, setIsEyedropperActive] = useState(false);
+  useEffect(() => {
+    cameraRef.current = camera;
+  }, [camera]);
 
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  useEffect(() => {
+    isPickerOpenRef.current = isPickerOpen;
+  }, [isPickerOpen]);
 
-  const pickerPosition =
-    selectedCell && isPickerOpen && canvasRect
-      ? (() => {
-          const screenPosition = worldToScreen(
-            selectedCell.x,
-            selectedCell.y,
-            CELL_SIZE,
-            camera,
-          );
-
-          return {
-            x: screenPosition.x + canvasRect.left,
-            y: screenPosition.y + canvasRect.top,
-          };
-        })()
-      : null;
-
-  const popupWidth = 244;
-  const popupHeight = 312;
-  const popupGap = CELL_SIZE * 1.5 * camera.zoom;
-
-  const popupPosition = pickerPosition
-    ? (() => {
-        const defaultLeft = pickerPosition.x - popupWidth - popupGap;
-        const flippedLeft =
-          pickerPosition.x + CELL_SIZE * camera.zoom + popupGap;
-
-        const defaultTop = pickerPosition.y;
-        const flippedTop =
-          pickerPosition.y - popupHeight + CELL_SIZE * camera.zoom;
-
-        const wouldOverflowLeft = defaultLeft < 0;
-        const wouldOverflowBottom = defaultTop + popupHeight > viewport.height;
-
-        return {
-          x: wouldOverflowLeft ? flippedLeft : defaultLeft,
-          y: wouldOverflowBottom ? flippedTop : defaultTop,
-        };
-      })()
-    : null;
-
-  const [board, setBoard] = useState<(string | null)[][]>(() =>
-    Array.from({ length: BOARD_HEIGHT }, () =>
-      Array.from({ length: BOARD_WIDTH }, () => null),
-    ),
-  );
-
-  const [selectedColor, setSelectedColor] = useState("black");
+  useEffect(() => {
+    isEyedropperActiveRef.current = isEyedropperActive;
+  }, [isEyedropperActive]);
 
   const getDisplayedCellColor = useCallback(
     (x: number, y: number) => {
+      const selectedCell = selectedCellRef.current;
+
       if (
         selectedCell &&
-        isPickerOpen &&
+        isPickerOpenRef.current &&
         x === selectedCell.x &&
         y === selectedCell.y
       ) {
-        return selectedColor;
+        return selectedColorRef.current;
       }
 
       return board[y][x] ?? "#ffffff";
     },
-    [board, selectedColor, selectedCell, isPickerOpen],
+    [board],
   );
 
+  const getDisplayedCellColorRef = useRef(getDisplayedCellColor);
+
+  useEffect(() => {
+    getDisplayedCellColorRef.current = getDisplayedCellColor;
+  }, [getDisplayedCellColor]);
+
   const clampCamera = useCallback(
-    (nextCamera: { x: number; y: number; zoom: number }) => {
+    (nextCamera: Camera) => {
       const boardPixelWidth = BOARD_WIDTH * CELL_SIZE * nextCamera.zoom;
       const boardPixelHeight = BOARD_HEIGHT * CELL_SIZE * nextCamera.zoom;
 
@@ -176,6 +191,12 @@ function App() {
     [viewport],
   );
 
+  const clampCameraRef = useRef(clampCamera);
+
+  useEffect(() => {
+    clampCameraRef.current = clampCamera;
+  }, [clampCamera]);
+
   useEffect(() => {
     function handleResize() {
       const width = window.innerWidth;
@@ -190,7 +211,7 @@ function App() {
       const minZoom = getMinZoom(width, height);
 
       setCamera((prev) =>
-        clampCamera({
+        clampCameraRef.current({
           ...prev,
           zoom: Math.max(prev.zoom, minZoom),
         }),
@@ -202,102 +223,187 @@ function App() {
     return () => {
       window.removeEventListener("resize", handleResize);
     };
-  }, [clampCamera]);
+  }, []);
 
-  const handleCanvasWheel = useCallback(
-    (event: WheelEvent) => {
-      event.preventDefault();
+  const handleCanvasWheel = useCallback((event: WheelEvent) => {
+    event.preventDefault();
 
-      const rect = (
-        event.currentTarget as HTMLCanvasElement
-      ).getBoundingClientRect();
+    const rect = (
+      event.currentTarget as HTMLCanvasElement
+    ).getBoundingClientRect();
 
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
 
-      setCamera((prevCamera) => {
-        const zoomSensitivity = 0.0015;
-        const zoomAmount = -event.deltaY * zoomSensitivity;
+    setCamera((prevCamera) => {
+      const zoomSensitivity = 0.0015;
+      const zoomAmount = -event.deltaY * zoomSensitivity;
 
-        const minZoom = getMinZoom(viewport.width, viewport.height);
-        const nextZoom = Math.max(
-          minZoom,
-          Math.min(8, prevCamera.zoom + zoomAmount),
-        );
+      const viewport = viewportRef.current;
+      const minZoom = getMinZoom(viewport.width, viewport.height);
+      const nextZoom = Math.max(
+        minZoom,
+        Math.min(8, prevCamera.zoom + zoomAmount),
+      );
 
-        const zoomRatio = nextZoom / prevCamera.zoom;
+      const zoomRatio = nextZoom / prevCamera.zoom;
 
-        const newCameraX = mouseX - (mouseX - prevCamera.x) * zoomRatio;
-        const newCameraY = mouseY - (mouseY - prevCamera.y) * zoomRatio;
+      const newCameraX = mouseX - (mouseX - prevCamera.x) * zoomRatio;
+      const newCameraY = mouseY - (mouseY - prevCamera.y) * zoomRatio;
 
-        return clampCamera({
-          zoom: nextZoom,
-          x: newCameraX,
-          y: newCameraY,
-        });
+      return clampCameraRef.current({
+        zoom: nextZoom,
+        x: newCameraX,
+        y: newCameraY,
       });
-    },
-    [clampCamera, viewport],
-  );
+    });
+  }, []);
 
-  const handleCanvasMouseDown = useCallback(
-    (event: MouseEvent) => {
-      if (isPickerOpen) return;
+  const handleCanvasMouseDown = useCallback((event: MouseEvent) => {
+    if (isPickerOpenRef.current) return;
 
-      dragStateRef.current = {
-        isDragging: true,
-        didDrag: false,
-        startMouseX: event.clientX,
-        startMouseY: event.clientY,
-        startCameraX: camera.x,
-        startCameraY: camera.y,
-      };
-    },
-    [camera.x, camera.y, isPickerOpen],
-  );
+    const camera = cameraRef.current;
 
-  const handleWindowMouseMove = useCallback(
-    (event: MouseEvent) => {
-      const dragState = dragStateRef.current;
+    dragStateRef.current = {
+      isDragging: true,
+      didDrag: false,
+      startMouseX: event.clientX,
+      startMouseY: event.clientY,
+      startCameraX: camera.x,
+      startCameraY: camera.y,
+    };
+  }, []);
 
-      if (!dragState.isDragging) return;
+  const handleWindowMouseMove = useCallback((event: MouseEvent) => {
+    const dragState = dragStateRef.current;
 
-      const deltaX = event.clientX - dragState.startMouseX;
-      const deltaY = event.clientY - dragState.startMouseY;
+    if (!dragState.isDragging) return;
 
-      const dragThreshold = 5;
+    const deltaX = event.clientX - dragState.startMouseX;
+    const deltaY = event.clientY - dragState.startMouseY;
 
-      if (!dragState.didDrag) {
-        if (
-          Math.abs(deltaX) < dragThreshold &&
-          Math.abs(deltaY) < dragThreshold
-        ) {
-          return;
-        }
+    const dragThreshold = 5;
 
-        dragStateRef.current.didDrag = true;
+    if (!dragState.didDrag) {
+      if (
+        Math.abs(deltaX) < dragThreshold &&
+        Math.abs(deltaY) < dragThreshold
+      ) {
+        return;
       }
 
-      setCamera((prevCamera) =>
-        clampCamera({
-          x: dragState.startCameraX + deltaX,
-          y: dragState.startCameraY + deltaY,
-          zoom: prevCamera.zoom,
-        }),
-      );
-    },
-    [clampCamera],
-  );
+      dragStateRef.current.didDrag = true;
+    }
+
+    setCamera((prevCamera) =>
+      clampCameraRef.current({
+        x: dragState.startCameraX + deltaX,
+        y: dragState.startCameraY + deltaY,
+        zoom: prevCamera.zoom,
+      }),
+    );
+  }, []);
 
   const handleWindowMouseUp = useCallback(() => {
     dragStateRef.current.isDragging = false;
+    dragStateRef.current.didDrag = false;
   }, []);
 
-  function handleCancelEdit() {
+  const renderBoard = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = viewport.width;
+    const displayHeight = viewport.height;
+    const internalWidth = Math.round(displayWidth * dpr);
+    const internalHeight = Math.round(displayHeight * dpr);
+
+    if (canvas.width !== internalWidth || canvas.height !== internalHeight) {
+      canvas.width = internalWidth;
+      canvas.height = internalHeight;
+    }
+
+    const hoveredCell = hoveredCellRef.current;
+    const scaledCellSize = CELL_SIZE * camera.zoom;
+    const startX = Math.max(0, Math.floor(-camera.x / scaledCellSize));
+    const startY = Math.max(0, Math.floor(-camera.y / scaledCellSize));
+    const endX = Math.min(
+      BOARD_WIDTH,
+      Math.ceil((viewport.width - camera.x) / scaledCellSize),
+    );
+    const endY = Math.min(
+      BOARD_HEIGHT,
+      Math.ceil((viewport.height - camera.y) / scaledCellSize),
+    );
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+    for (let x = startX; x < endX; x++) {
+      for (let y = startY; y < endY; y++) {
+        const color = board[y][x];
+
+        let displayColor = color;
+
+        if (
+          selectedCell &&
+          x === selectedCell.x &&
+          y === selectedCell.y &&
+          isPickerOpen
+        ) {
+          displayColor = selectedColor;
+        }
+
+        if (displayColor) {
+          drawCell(ctx, x, y, displayColor, CELL_SIZE, camera);
+        }
+      }
+    }
+
+    if (isPickerOpen && isEyedropperActive && hoveredCell) {
+      drawHoveredCellBorder(
+        ctx,
+        hoveredCell.x,
+        hoveredCell.y,
+        CELL_SIZE,
+        camera,
+      );
+    } else if (selectedCell) {
+      drawHoveredCellBorder(
+        ctx,
+        selectedCell.x,
+        selectedCell.y,
+        CELL_SIZE,
+        camera,
+      );
+    } else if (hoveredCell) {
+      drawHoveredCellBorder(
+        ctx,
+        hoveredCell.x,
+        hoveredCell.y,
+        CELL_SIZE,
+        camera,
+      );
+    }
+  }, [
+    board,
+    camera,
+    viewport,
+    selectedCell,
+    selectedColor,
+    isPickerOpen,
+    isEyedropperActive,
+  ]);
+
+  const handleCancelEdit = useCallback(() => {
     setIsPickerOpen(false);
     setSelectedCell(null);
     setIsEyedropperActive(false);
-  }
+  }, []);
 
   function handleApplyColor() {
     if (!selectedCell) return;
@@ -308,93 +414,29 @@ function App() {
       return newBoard;
     });
 
-    setIsPickerOpen(false);
-    setSelectedCell(null);
-    setIsEyedropperActive(false);
+    handleCancelEdit();
   }
+
+  useEffect(() => {
+    renderBoard();
+  }, [renderBoard]);
+
+  useEffect(() => {
+    renderBoardRef.current = renderBoard;
+  }, [renderBoard]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let hoveredCell: { x: number; y: number } | null = null;
-
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && isPickerOpen) {
+      if (event.key === "Escape" && isPickerOpenRef.current) {
         handleCancelEdit();
       }
     }
 
-    function renderBoard() {
-      ctx!.clearRect(0, 0, canvas!.width, canvas!.height);
-
-      const scaledCellSize = CELL_SIZE * camera.zoom;
-
-      const startX = Math.max(0, Math.floor(-camera.x / scaledCellSize));
-      const startY = Math.max(0, Math.floor(-camera.y / scaledCellSize));
-
-      const endX = Math.min(
-        BOARD_WIDTH,
-        Math.ceil((viewport.width - camera.x) / scaledCellSize),
-      );
-
-      const endY = Math.min(
-        BOARD_HEIGHT,
-        Math.ceil((viewport.height - camera.y) / scaledCellSize),
-      );
-
-      for (let x = startX; x < endX; x++) {
-        for (let y = startY; y < endY; y++) {
-          const color = board[y][x];
-
-          let displayColor = color;
-
-          if (
-            selectedCell &&
-            x === selectedCell.x &&
-            y === selectedCell.y &&
-            isPickerOpen
-          ) {
-            displayColor = selectedColor;
-          }
-
-          if (displayColor) {
-            drawCell(ctx!, x, y, displayColor, CELL_SIZE, camera);
-          }
-        }
-      }
-
-      if (isPickerOpen && isEyedropperActive && hoveredCell) {
-        drawHoveredCellBorder(
-          ctx!,
-          hoveredCell.x,
-          hoveredCell.y,
-          CELL_SIZE,
-          camera,
-        );
-      } else if (selectedCell) {
-        drawHoveredCellBorder(
-          ctx!,
-          selectedCell.x,
-          selectedCell.y,
-          CELL_SIZE,
-          camera,
-        );
-      } else if (hoveredCell) {
-        drawHoveredCellBorder(
-          ctx!,
-          hoveredCell.x,
-          hoveredCell.y,
-          CELL_SIZE,
-          camera,
-        );
-      }
-    }
-
     function getCellFromMouse(event: MouseEvent) {
+      const camera = cameraRef.current;
       const rect = canvas!.getBoundingClientRect();
       const hoverOffset = 4;
 
@@ -422,8 +464,8 @@ function App() {
       }
       const clickedCell = getCellFromMouse(event);
 
-      if (isPickerOpen && isEyedropperActive) {
-        const sampledColor = getDisplayedCellColor(
+      if (isPickerOpenRef.current && isEyedropperActiveRef.current) {
+        const sampledColor = getDisplayedCellColorRef.current(
           clickedCell.x,
           clickedCell.y,
         );
@@ -432,7 +474,7 @@ function App() {
         return;
       }
 
-      if (isPickerOpen) {
+      if (isPickerOpenRef.current) {
         handleCancelEdit();
         return;
       }
@@ -445,6 +487,8 @@ function App() {
     function handleCanvasMouseMove(event: MouseEvent) {
       const nextHoveredCell = getCellFromMouse(event);
 
+      const hoveredCell = hoveredCellRef.current;
+
       if (
         hoveredCell &&
         hoveredCell.x === nextHoveredCell.x &&
@@ -453,35 +497,35 @@ function App() {
         return;
       }
 
-      hoveredCell = nextHoveredCell;
+      hoveredCellRef.current = nextHoveredCell;
 
-      if (isPickerOpen && isEyedropperActive) {
-        const sampledColor = getDisplayedCellColor(
-          hoveredCell.x,
-          hoveredCell.y,
+      if (isPickerOpenRef.current && isEyedropperActiveRef.current) {
+        const sampledColor = getDisplayedCellColorRef.current(
+          nextHoveredCell.x,
+          nextHoveredCell.y,
         );
 
-        if (sampledColor !== selectedColor) {
+        if (sampledColor !== selectedColorRef.current) {
           setSelectedColor(sampledColor);
         }
       }
 
-      renderBoard();
+      renderBoardRef.current?.();
     }
 
     function handleCanvasMouseLeave() {
-      hoveredCell = null;
-      renderBoard();
-    }
+      if (!hoveredCellRef.current) return;
 
-    renderBoard();
+      hoveredCellRef.current = null;
+      renderBoardRef.current?.();
+    }
 
     canvas.addEventListener("wheel", handleCanvasWheel, { passive: false });
     canvas.addEventListener("click", handleCanvasClick);
     canvas.addEventListener("mousemove", handleCanvasMouseMove);
     canvas.addEventListener("mouseleave", handleCanvasMouseLeave);
-    window.addEventListener("keydown", handleKeyDown);
     canvas.addEventListener("mousedown", handleCanvasMouseDown);
+    window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
 
@@ -490,28 +534,111 @@ function App() {
       canvas.removeEventListener("click", handleCanvasClick);
       canvas.removeEventListener("mousemove", handleCanvasMouseMove);
       canvas.removeEventListener("mouseleave", handleCanvasMouseLeave);
-      window.removeEventListener("keydown", handleKeyDown);
       canvas.removeEventListener("mousedown", handleCanvasMouseDown);
+      window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };
   }, [
-    board,
-    selectedColor,
-    selectedCell,
-    isPickerOpen,
-    isEyedropperActive,
-    getDisplayedCellColor,
-    camera,
     handleCanvasWheel,
     handleCanvasMouseDown,
     handleWindowMouseMove,
     handleWindowMouseUp,
-    viewport,
+    handleCancelEdit,
   ]);
+
+  const pickerPosition =
+    selectedCell && isPickerOpen && canvasRect
+      ? (() => {
+          const screenPosition = worldToScreen(
+            selectedCell.x,
+            selectedCell.y,
+            CELL_SIZE,
+            camera,
+          );
+
+          return {
+            x: screenPosition.x + canvasRect.left,
+            y: screenPosition.y + canvasRect.top,
+          };
+        })()
+      : null;
+
+  const popupGap = CELL_SIZE * 1.5 * camera.zoom;
+
+  const popupPosition = pickerPosition
+    ? (() => {
+        const defaultLeft = pickerPosition.x - POPUP_WIDTH - popupGap;
+        const flippedLeft =
+          pickerPosition.x + CELL_SIZE * camera.zoom + popupGap;
+        const defaultTop = pickerPosition.y;
+        const flippedTop =
+          pickerPosition.y - POPUP_HEIGHT + CELL_SIZE * camera.zoom;
+        const wouldOverflowLeft = defaultLeft < 0;
+        const wouldOverflowBottom = defaultTop + POPUP_HEIGHT > viewport.height;
+
+        return {
+          x: wouldOverflowLeft ? flippedLeft : defaultLeft,
+          y: wouldOverflowBottom ? flippedTop : defaultTop,
+        };
+      })()
+    : null;
+
+  const [isWalletHoverFlipEnabled, setIsWalletHoverFlipEnabled] =
+    useState(true);
+
+  const shouldShowConnectedIcon = isWalletHoverFlipEnabled
+    ? isWalletConnected !== isWalletButtonHovered
+    : isWalletConnected;
+
+  const walletIconSrc = shouldShowConnectedIcon
+    ? walletConnectedIcon
+    : walletDisconnectedIcon;
+
+  const walletAddressPreview = "0x...8dh4";
 
   return (
     <div className="app">
+      <div className="hud">
+        <div className="hud-left">
+          <h1 className="app-title">BitPlace</h1>
+        </div>
+
+        <div className="hud-right">
+          <button
+            className={`hud-button ${
+              isWalletConnected
+                ? "hud-button--connected"
+                : "hud-button--disconnected"
+            }`}
+            onMouseEnter={() => setIsWalletButtonHovered(true)}
+            onMouseLeave={() => {
+              setIsWalletButtonHovered(false);
+              setIsWalletHoverFlipEnabled(true);
+            }}
+            onClick={(event) => {
+              setIsWalletConnected((prev) => !prev);
+              setIsWalletHoverFlipEnabled(false);
+              event.currentTarget.blur();
+            }}
+          >
+            <span
+              className={`wallet-label ${
+                isWalletConnected ? "wallet-label--visible" : ""
+              }`}
+            >
+              {walletAddressPreview}
+            </span>
+
+            <img
+              src={walletIconSrc}
+              alt={isWalletConnected ? "Wallet connected" : "Connect wallet"}
+              className="wallet-icon"
+            />
+          </button>
+        </div>
+      </div>
+
       {isPickerOpen && popupPosition && (
         <div
           style={{
@@ -591,8 +718,10 @@ function App() {
       <canvas
         ref={canvasRef}
         className="board-canvas"
-        width={viewport.width}
-        height={viewport.height}
+        style={{
+          width: `${viewport.width}px`,
+          height: `${viewport.height}px`,
+        }}
       />
     </div>
   );

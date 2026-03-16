@@ -18,11 +18,13 @@ export function drawCell(
   cellSize: number,
   camera: { x: number; y: number; zoom: number },
 ) {
-  const screen = worldToScreen(x, y, cellSize, camera);
-  const scaledCellSize = cellSize * camera.zoom;
+  const left = Math.round(camera.x + x * cellSize * camera.zoom);
+  const top = Math.round(camera.y + y * cellSize * camera.zoom);
+  const right = Math.round(camera.x + (x + 1) * cellSize * camera.zoom);
+  const bottom = Math.round(camera.y + (y + 1) * cellSize * camera.zoom);
 
   ctx.fillStyle = color;
-  ctx.fillRect(screen.x, screen.y, scaledCellSize, scaledCellSize);
+  ctx.fillRect(left, top, right - left, bottom - top);
 }
 
 export function drawHoveredCellBorder(
@@ -32,15 +34,12 @@ export function drawHoveredCellBorder(
   cellSize: number,
   camera: { x: number; y: number; zoom: number },
 ) {
-  const screen = worldToScreen(x, y, cellSize, camera);
-  const scaledCellSize = cellSize * camera.zoom;
+  const left = Math.round(camera.x + x * cellSize * camera.zoom);
+  const top = Math.round(camera.y + y * cellSize * camera.zoom);
+  const right = Math.round(camera.x + (x + 1) * cellSize * camera.zoom);
+  const bottom = Math.round(camera.y + (y + 1) * cellSize * camera.zoom);
 
-  ctx.strokeStyle = "#555";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(
-    screen.x + 0.5,
-    screen.y + 0.5,
-    scaledCellSize - 1,
-    scaledCellSize - 1,
-  );
+  ctx.strokeStyle = "#5555558e";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(left, top, right - left, bottom - top);
 }
