@@ -4,6 +4,10 @@ import { ChromePicker } from "react-color";
 import { Pipette, X, Plus, Minus, CircleHelp, Moon, Sun } from "lucide-react";
 import walletDisconnectedIcon from "./assets/disconnected.svg";
 import walletConnectedIcon from "./assets/connected.svg";
+import { useAccount, useDisconnect, useEnsName } from "wagmi";
+import { mainnet } from "wagmi/chains";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+
 import {
   drawCell,
   drawHoveredCellBorder,
@@ -17,9 +21,10 @@ const RPC_URL = "http://127.0.0.1:8545";
 
 const ABI = [
   "function getPixelsRange(uint32 startIndex, uint32 count) view returns (uint32[] memory)",
+  "event PixelPainted(address indexed painter, uint16 indexed x, uint16 indexed y, uint24 color)",
 ];
 
-async function loadBoardFromContract(): Promise<(string | null)[][]> {
+async function loadFullBoardFromContract(): Promise<(string | null)[][]> {
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
 
@@ -77,6 +82,12 @@ const BOARD_HEIGHT = 300;
 const CELL_SIZE = 5;
 const POPUP_WIDTH = 244;
 const POPUP_HEIGHT = 312;
+const CACHE_KEY = "bitplace_board_v1";
+
+type BoardCache = {
+  board: (string | null)[][];
+  lastSyncedBlock: number;
+};
 
 type CellPosition = {
   x: number;
@@ -106,6 +117,39 @@ type Viewport = {
 const getBoardWorldWidth = () => BOARD_WIDTH * CELL_SIZE;
 const getBoardWorldHeight = () => BOARD_HEIGHT * CELL_SIZE;
 
+function saveBoardToCache(cache: BoardCache) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    console.warn("Failed to save board cache", error);
+  }
+}
+
+function loadBoardFromCache(): BoardCache | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+
+    if (
+      !parsed ||
+      !Array.isArray(parsed.board) ||
+      parsed.board.length !== BOARD_HEIGHT ||
+      !Array.isArray(parsed.board[0]) ||
+      parsed.board[0].length !== BOARD_WIDTH ||
+      typeof parsed.lastSyncedBlock !== "number"
+    ) {
+      return null;
+    }
+
+    return parsed as BoardCache;
+  } catch (error) {
+    console.warn("Failed to load board cache", error);
+    return null;
+  }
+}
+
 const getMinZoom = (viewportWidth: number, viewportHeight: number) => {
   return Math.max(
     viewportWidth / getBoardWorldWidth(),
@@ -128,6 +172,37 @@ const getCenteredCamera = (
   };
 };
 
+async function applyPixelPaintedEventsSince(
+  board: (string | null)[][],
+  fromBlock: number,
+): Promise<{ board: (string | null)[][]; latestBlock: number }> {
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
+
+  const latestBlock = await provider.getBlockNumber();
+
+  if (fromBlock > latestBlock) {
+    return { board, latestBlock };
+  }
+
+  const nextBoard = board.map((row) => [...row]);
+
+  const filter = contract.filters.PixelPainted();
+  const events = await contract.queryFilter(filter, fromBlock, latestBlock);
+
+  for (const event of events) {
+    if (!("args" in event) || !event.args) continue;
+
+    const x = Number(event.args.x);
+    const y = Number(event.args.y);
+    const color = Number(event.args.color);
+
+    nextBoard[y][x] = "#" + color.toString(16).padStart(6, "0");
+  }
+
+  return { board: nextBoard, latestBlock };
+}
+
 function App() {
   const [board, setBoard] = useState<(string | null)[][]>(() =>
     Array.from({ length: BOARD_HEIGHT }, () =>
@@ -135,7 +210,13 @@ function App() {
     ),
   );
 
-  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+  const { data: ensName } = useEnsName({
+    address,
+    chainId: mainnet.id,
+  });
+  const { openConnectModal, connectModalOpen } = useConnectModal();
   const [isWalletButtonHovered, setIsWalletButtonHovered] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -185,15 +266,52 @@ function App() {
 
     async function bootstrapBoard() {
       const start = performance.now();
+      const minSplashMs = 700;
 
-      const contractBoard = await loadBoardFromContract();
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const currentBlock = await provider.getBlockNumber();
+
+      const cached = loadBoardFromCache();
+
+      if (cached && !cancelled) {
+        setBoard(cached.board);
+
+        const elapsed = performance.now() - start;
+        const remaining = Math.max(0, minSplashMs - elapsed);
+
+        window.setTimeout(() => {
+          if (cancelled) return;
+          setIsAppVisible(true);
+          setIsIntroVisible(false);
+        }, remaining);
+
+        const synced = await applyPixelPaintedEventsSince(
+          cached.board,
+          cached.lastSyncedBlock + 1,
+        );
+
+        if (cancelled) return;
+
+        setBoard(synced.board);
+        saveBoardToCache({
+          board: synced.board,
+          lastSyncedBlock: synced.latestBlock,
+        });
+
+        return;
+      }
+
+      const freshBoard = await loadFullBoardFromContract();
 
       if (cancelled) return;
 
-      setBoard(contractBoard);
+      setBoard(freshBoard);
+      saveBoardToCache({
+        board: freshBoard,
+        lastSyncedBlock: currentBlock,
+      });
 
       const elapsed = performance.now() - start;
-      const minSplashMs = 700;
       const remaining = Math.max(0, minSplashMs - elapsed);
 
       window.setTimeout(() => {
@@ -709,15 +827,21 @@ function App() {
   const [isWalletHoverFlipEnabled, setIsWalletHoverFlipEnabled] =
     useState(true);
 
+  const isWalletVisuallyHovered = isWalletButtonHovered || !!connectModalOpen;
+
   const shouldShowConnectedIcon = isWalletHoverFlipEnabled
-    ? isWalletConnected !== isWalletButtonHovered
-    : isWalletConnected;
+    ? isConnected !== isWalletVisuallyHovered
+    : isConnected;
 
   const walletIconSrc = shouldShowConnectedIcon
     ? walletConnectedIcon
     : walletDisconnectedIcon;
 
-  const walletAddressPreview = "0x...8dh4";
+  const walletAddressPreview = ensName
+    ? ensName.replace(/\.eth$/i, "")
+    : address
+      ? `0x...${address.slice(-4)}`
+      : "";
 
   return (
     <>
@@ -765,7 +889,7 @@ function App() {
 
             <button
               className={`hud-button ${
-                isWalletConnected
+                isConnected
                   ? "hud-button--connected"
                   : "hud-button--disconnected"
               }`}
@@ -775,14 +899,19 @@ function App() {
                 setIsWalletHoverFlipEnabled(true);
               }}
               onClick={(event) => {
-                setIsWalletConnected((prev) => !prev);
-                setIsWalletHoverFlipEnabled(false);
                 event.currentTarget.blur();
+
+                if (isConnected) {
+                  disconnect();
+                  return;
+                }
+
+                openConnectModal?.();
               }}
             >
               <span
                 className={`wallet-label ${
-                  isWalletConnected ? "wallet-label--visible" : ""
+                  isConnected ? "wallet-label--visible" : ""
                 }`}
               >
                 {walletAddressPreview}
@@ -790,7 +919,7 @@ function App() {
 
               <img
                 src={walletIconSrc}
-                alt={isWalletConnected ? "Wallet connected" : "Connect wallet"}
+                alt={isConnected ? "Wallet connected" : "Connect wallet"}
                 className="wallet-icon"
               />
             </button>
@@ -801,14 +930,25 @@ function App() {
           <div className="help-popup">
             <div className="help-popup__title">About BitPlace</div>
             <div className="help-popup__body">
-              BitPlace is a permanent public pixel board on Arbitrum One.
+              BitPlace is a fully on-chain collaborative pixel art canvas on
+              Arbitrum, similar to r/place.
               <br />
               <br />
-              Everyone can view the canvas. Connect a wallet to paint.
+              Connect a wallet to start painting!
               <br />
               <br />
-              Each wallet gets 5 free pixels per 24 hours, then extra paints
-              cost a small fee.
+              Each wallet gets 5 free pixel paints per 24 hours, then extra
+              paints cost a small fee, about ~$0.50 in ETH.
+              <br />
+              <br />
+              Extra paint fees go into a lottery pool. Everytime you paint your
+              6th pixel of the day, you're automatically entered into the
+              lottery!
+              <br />
+              If you win, you receive 75% of all ETH in the pool automatically!
+              <br />
+              <br />
+              <em>2.5% chance of winning each day</em>
             </div>
           </div>
         )}
