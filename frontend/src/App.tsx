@@ -10,6 +10,68 @@ import {
   worldToScreen,
 } from "./boardRenderer";
 
+import { ethers } from "ethers";
+
+const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const RPC_URL = "http://127.0.0.1:8545";
+
+const ABI = [
+  "function getPixelsRange(uint32 startIndex, uint32 count) view returns (uint32[] memory)",
+];
+
+async function loadBoardFromContract(): Promise<(string | null)[][]> {
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
+
+  const CHUNK = 4096;
+  const PARALLEL = 4;
+  const total = BOARD_WIDTH * BOARD_HEIGHT;
+
+  const board: (string | null)[][] = Array.from({ length: BOARD_HEIGHT }, () =>
+    Array.from({ length: BOARD_WIDTH }, () => null),
+  );
+
+  for (let start = 0; start < total; start += CHUNK * PARALLEL) {
+    const jobs: Promise<bigint[]>[] = [];
+    const ranges: number[] = [];
+
+    for (let i = 0; i < PARALLEL; i++) {
+      const chunkStart = start + i * CHUNK;
+      if (chunkStart >= total) break;
+
+      const count = Math.min(CHUNK, total - chunkStart);
+      jobs.push(contract.getPixelsRange(chunkStart, count));
+      ranges.push(chunkStart);
+    }
+
+    const results = await Promise.all(jobs);
+
+    for (let batchIndex = 0; batchIndex < results.length; batchIndex++) {
+      const pixels = results[batchIndex];
+      const chunkStart = ranges[batchIndex];
+
+      for (let i = 0; i < pixels.length; i++) {
+        const index = chunkStart + i;
+        const stored = Number(pixels[i]);
+
+        if (stored === 0) continue;
+
+        const rgb = stored - 1;
+        const hex = "#" + rgb.toString(16).padStart(6, "0");
+
+        const x = index % BOARD_WIDTH;
+        const y = Math.floor(index / BOARD_WIDTH);
+
+        board[y][x] = hex;
+      }
+    }
+
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  return board;
+}
+
 const BOARD_WIDTH = 510;
 const BOARD_HEIGHT = 300;
 const CELL_SIZE = 5;
@@ -119,17 +181,32 @@ function App() {
   const isEyedropperActiveRef = useRef(isEyedropperActive);
 
   useEffect(() => {
-    const showAppTimer = window.setTimeout(() => {
-      setIsAppVisible(true);
-    }, 50);
+    let cancelled = false;
 
-    const hideIntroTimer = window.setTimeout(() => {
-      setIsIntroVisible(false);
-    }, 700);
+    async function bootstrapBoard() {
+      const start = performance.now();
+
+      const contractBoard = await loadBoardFromContract();
+
+      if (cancelled) return;
+
+      setBoard(contractBoard);
+
+      const elapsed = performance.now() - start;
+      const minSplashMs = 700;
+      const remaining = Math.max(0, minSplashMs - elapsed);
+
+      window.setTimeout(() => {
+        if (cancelled) return;
+        setIsAppVisible(true);
+        setIsIntroVisible(false);
+      }, remaining);
+    }
+
+    bootstrapBoard();
 
     return () => {
-      window.clearTimeout(showAppTimer);
-      window.clearTimeout(hideIntroTimer);
+      cancelled = true;
     };
   }, []);
 
@@ -643,200 +720,204 @@ function App() {
   const walletAddressPreview = "0x...8dh4";
 
   return (
-    <div
-      className={`app ${isDarkMode ? "app--dark" : "app--light"} ${isAppVisible ? "app--visible" : ""}`}
-    >
+    <>
       {isIntroVisible && (
         <div
           className={`intro-splash ${isAppVisible ? "intro-splash--fade" : ""}`}
         >
           <div className="intro-splash__title">BitPlace</div>
+          <div className="intro-splash__subtitle">is loading...</div>
         </div>
       )}
-      <div className="hud">
-        <div className="hud-left">
-          <div className="title-group">
-            <h1 className="app-title">BitPlace</h1>
+
+      <div
+        className={`app ${isDarkMode ? "app--dark" : "app--light"} ${isAppVisible ? "app--visible" : ""}`}
+      >
+        <div className="hud">
+          <div className="hud-left">
+            <div className="title-group">
+              <h1 className="app-title">BitPlace</h1>
+
+              <button
+                className={`help-icon-button ${
+                  isHelpOpen ? "help-icon-button--active" : ""
+                }`}
+                onClick={() => setIsHelpOpen((prev) => !prev)}
+                aria-label="Help"
+              >
+                <CircleHelp size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="hud-right">
+            <div className="hud-controls">
+              <button
+                className="hud-icon-button"
+                onClick={() => setIsDarkMode((prev) => !prev)}
+                aria-label={
+                  isDarkMode ? "Switch to light mode" : "Switch to dark mode"
+                }
+              >
+                {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+            </div>
 
             <button
-              className={`help-icon-button ${
-                isHelpOpen ? "help-icon-button--active" : ""
+              className={`hud-button ${
+                isWalletConnected
+                  ? "hud-button--connected"
+                  : "hud-button--disconnected"
               }`}
-              onClick={() => setIsHelpOpen((prev) => !prev)}
-              aria-label="Help"
+              onMouseEnter={() => setIsWalletButtonHovered(true)}
+              onMouseLeave={() => {
+                setIsWalletButtonHovered(false);
+                setIsWalletHoverFlipEnabled(true);
+              }}
+              onClick={(event) => {
+                setIsWalletConnected((prev) => !prev);
+                setIsWalletHoverFlipEnabled(false);
+                event.currentTarget.blur();
+              }}
             >
-              <CircleHelp size={18} />
+              <span
+                className={`wallet-label ${
+                  isWalletConnected ? "wallet-label--visible" : ""
+                }`}
+              >
+                {walletAddressPreview}
+              </span>
+
+              <img
+                src={walletIconSrc}
+                alt={isWalletConnected ? "Wallet connected" : "Connect wallet"}
+                className="wallet-icon"
+              />
             </button>
           </div>
         </div>
 
-        <div className="hud-right">
-          <div className="hud-controls">
-            <button
-              className="hud-icon-button"
-              onClick={() => setIsDarkMode((prev) => !prev)}
-              aria-label={
-                isDarkMode ? "Switch to light mode" : "Switch to dark mode"
-              }
-            >
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
+        {isHelpOpen && (
+          <div className="help-popup">
+            <div className="help-popup__title">About BitPlace</div>
+            <div className="help-popup__body">
+              BitPlace is a permanent public pixel board on Arbitrum One.
+              <br />
+              <br />
+              Everyone can view the canvas. Connect a wallet to paint.
+              <br />
+              <br />
+              Each wallet gets 5 free pixels per 24 hours, then extra paints
+              cost a small fee.
+            </div>
           </div>
+        )}
+
+        <div className="zoom-controls">
+          <button
+            className="hud-icon-button"
+            onClick={() => zoomBy(1)}
+            aria-label="Zoom in"
+          >
+            <Plus size={18} />
+          </button>
 
           <button
-            className={`hud-button ${
-              isWalletConnected
-                ? "hud-button--connected"
-                : "hud-button--disconnected"
-            }`}
-            onMouseEnter={() => setIsWalletButtonHovered(true)}
-            onMouseLeave={() => {
-              setIsWalletButtonHovered(false);
-              setIsWalletHoverFlipEnabled(true);
-            }}
-            onClick={(event) => {
-              setIsWalletConnected((prev) => !prev);
-              setIsWalletHoverFlipEnabled(false);
-              event.currentTarget.blur();
-            }}
+            className="hud-icon-button"
+            onClick={() => zoomBy(-1)}
+            aria-label="Zoom out"
           >
-            <span
-              className={`wallet-label ${
-                isWalletConnected ? "wallet-label--visible" : ""
-              }`}
-            >
-              {walletAddressPreview}
-            </span>
-
-            <img
-              src={walletIconSrc}
-              alt={isWalletConnected ? "Wallet connected" : "Connect wallet"}
-              className="wallet-icon"
-            />
+            <Minus size={18} />
           </button>
         </div>
-      </div>
 
-      {isHelpOpen && (
-        <div className="help-popup">
-          <div className="help-popup__title">About BitPlace</div>
-          <div className="help-popup__body">
-            BitPlace is a permanent public pixel board on Arbitrum One.
-            <br />
-            <br />
-            Everyone can view the canvas. Connect a wallet to paint.
-            <br />
-            <br />
-            Each wallet gets 5 free pixels per 24 hours, then extra paints cost
-            a small fee.
-          </div>
-        </div>
-      )}
-
-      <div className="zoom-controls">
-        <button
-          className="hud-icon-button"
-          onClick={() => zoomBy(1)}
-          aria-label="Zoom in"
-        >
-          <Plus size={18} />
-        </button>
-
-        <button
-          className="hud-icon-button"
-          onClick={() => zoomBy(-1)}
-          aria-label="Zoom out"
-        >
-          <Minus size={18} />
-        </button>
-      </div>
-
-      {isPickerOpen && popupPosition && (
-        <div
-          style={{
-            position: "absolute",
-            overflow: "visible",
-            height: "312px",
-            width: "244px",
-            left: `${popupPosition!.x}px`,
-            top: `${popupPosition!.y}px`,
-            backgroundColor: isDarkMode ? "#2a2a2a" : "white",
-            border: isDarkMode ? "1px solid #4a4a4a" : "1px solid #b0a6a6",
-            zIndex: 10,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            flexDirection: "column",
-            gap: "8px",
-            boxSizing: "border-box",
-            padding: "8px",
-            borderRadius: "4px",
-          }}
-        >
-          <ChromePicker
-            styles={{
-              default: {
-                picker: {
-                  width: "100%",
-                  boxSizing: "border-box",
-                  background: isDarkMode ? "#2a2a2a" : "#ffffff",
-                },
-              },
-            }}
-            color={selectedColor}
-            onChange={(color) => setSelectedColor(color.hex)}
-          />
-
+        {isPickerOpen && popupPosition && (
           <div
             style={{
+              position: "absolute",
+              overflow: "visible",
+              height: "312px",
+              width: "244px",
+              left: `${popupPosition!.x}px`,
+              top: `${popupPosition!.y}px`,
+              backgroundColor: isDarkMode ? "#2a2a2a" : "white",
+              border: isDarkMode ? "1px solid #4a4a4a" : "1px solid #b0a6a6",
+              zIndex: 10,
               display: "flex",
-              gap: "2px",
-              width: "100%",
+              justifyContent: "center",
+              alignItems: "center",
+              flexDirection: "column",
+              gap: "8px",
+              boxSizing: "border-box",
+              padding: "8px",
+              borderRadius: "4px",
             }}
           >
-            <button
-              className={`utility-button${isEyedropperActive ? " active-tool" : ""}`}
-              onClick={() => setIsEyedropperActive(!isEyedropperActive)}
-              style={{
-                backgroundColor: "#1756d5",
+            <ChromePicker
+              styles={{
+                default: {
+                  picker: {
+                    width: "100%",
+                    boxSizing: "border-box",
+                    background: isDarkMode ? "#2a2a2a" : "#ffffff",
+                  },
+                },
               }}
-            >
-              <Pipette size={18} />
-            </button>
+              color={selectedColor}
+              onChange={(color) => setSelectedColor(color.hex)}
+            />
 
-            <button
-              className="utility-button"
+            <div
               style={{
-                flex: 1,
-                backgroundColor: "#0bc11d",
+                display: "flex",
+                gap: "2px",
+                width: "100%",
               }}
-              onClick={handleApplyColor}
             >
-              CONFIRM
-            </button>
+              <button
+                className={`utility-button${isEyedropperActive ? " active-tool" : ""}`}
+                onClick={() => setIsEyedropperActive(!isEyedropperActive)}
+                style={{
+                  backgroundColor: "#1756d5",
+                }}
+              >
+                <Pipette size={18} />
+              </button>
 
-            <button
-              className="utility-button"
-              style={{
-                backgroundColor: "#d63a3a",
-              }}
-              onClick={handleCancelEdit}
-            >
-              <X size={23} />
-            </button>
+              <button
+                className="utility-button"
+                style={{
+                  flex: 1,
+                  backgroundColor: "#0bc11d",
+                }}
+                onClick={handleApplyColor}
+              >
+                CONFIRM
+              </button>
+
+              <button
+                className="utility-button"
+                style={{
+                  backgroundColor: "#d63a3a",
+                }}
+                onClick={handleCancelEdit}
+              >
+                <X size={23} />
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <canvas
-        ref={canvasRef}
-        className={`board-canvas ${isDarkMode ? "board-canvas--dark" : "board-canvas--light"}`}
-        style={{
-          width: `${viewport.width}px`,
-          height: `${viewport.height}px`,
-        }}
-      />
-    </div>
+        <canvas
+          ref={canvasRef}
+          className={`board-canvas ${isDarkMode ? "board-canvas--dark" : "board-canvas--light"}`}
+          style={{
+            width: `${viewport.width}px`,
+            height: `${viewport.height}px`,
+          }}
+        />
+      </div>
+    </>
   );
 }
 
