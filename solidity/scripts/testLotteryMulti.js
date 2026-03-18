@@ -29,7 +29,7 @@ async function main() {
   );
 
   // Use a few different local accounts
-  for (let s = 5; s < 8; s++) {
+  for (let s = 0; s < 5; s++) {
     const signer = signers[s];
     const signerAddress = await signer.getAddress();
     const connectedBitPlace = bitPlace.connect(signer);

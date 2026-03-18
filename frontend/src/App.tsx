@@ -591,7 +591,6 @@ function App() {
 
   const handleWindowMouseUp = useCallback(() => {
     dragStateRef.current.isDragging = false;
-    dragStateRef.current.didDrag = false;
   }, []);
 
   const zoomBy = useCallback((direction: 1 | -1) => {
@@ -738,12 +737,9 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const signerAddress = await signer.getAddress();
-
       const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-
       const [isFree] = await contract.getPaintStatus(signerAddress);
       const paidPaintFeeWei = await contract.paidPaintFeeWei();
-
       const colorInt = parseInt(selectedColor.replace("#", ""), 16);
       const txValue = isFree ? 0n : paidPaintFeeWei;
 
