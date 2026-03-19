@@ -9,12 +9,20 @@ export default defineConfig({
     version: "0.8.28",
   },
   networks: {
-    hardhat: {
-      type: "edr-simulated",
-      mining: {
-        auto: false,
-        interval: 10000,
-      },
+    // hardhat: {
+    //   type: "edr-simulated",
+    //   mining: {
+    //     auto: false,
+    //     interval: 10000,
+    //   },
+    // },
+
+    arbitrumSepolia: {
+      type: "http",
+      chainType: "generic",
+      chainId: 421614,
+      url: process.env.ARBITRUM_SEPOLIA_RPC!,
+      accounts: [process.env.PRIVATE_KEY!],
     },
   },
 });

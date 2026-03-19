@@ -15,6 +15,9 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+solidity/.env
+solidity/.env.local
+solidity/.env.*.local
 
 # =========================================================
 # Frontend build output (Vite)

@@ -1273,7 +1273,7 @@ function App() {
               on Twitter/X.
               <br />
               <br />
-              Each wallet can paint up to 5 pixels for{" "}
+              Each wallet can paint up to 10 pixels for{" "}
               <span style={{ color: "#0bc11d", fontWeight: "bold" }}>
                 free
               </span>{" "}
@@ -1285,7 +1285,7 @@ function App() {
               <br />
               <br />
               Since this is all for fun, 100% of those fees go into a lottery
-              pool. Everytime you paint your 6th pixel of the day, you're
+              pool. Everytime you paint your 11th pixel of the day, you're
               automatically entered into the lottery!
               <br />
               If you win, you receive 75% of all ETH in the pool automatically!

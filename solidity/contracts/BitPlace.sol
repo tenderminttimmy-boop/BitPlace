@@ -12,7 +12,7 @@ contract BitPlace is Ownable, ReentrancyGuard {
     uint16 public constant BOARD_WIDTH = 510;
     uint16 public constant BOARD_HEIGHT = 300;
     uint32 public constant TOTAL_CELLS = 153000;
-    uint8 public constant FREE_PAINTS_PER_WINDOW = 5;
+    uint8 public constant FREE_PAINTS_PER_WINDOW = 10;
 
     // ============================================================
     // Events
