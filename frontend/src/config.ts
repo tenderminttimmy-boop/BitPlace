@@ -24,11 +24,11 @@ const configs: Record<string, AppConfig> = {
     chainId: 42161,
     chainName: "Arbitrum One",
     rpcUrl: "https://arb1.arbitrum.io/rpc",
-    contractAddress: "REPLACE_ME",
+    contractAddress: "0xB22680671f6b2dFDd83b41229cb87C14e9de7754",
   },
 };
 
 // Change this to switch between configs (e.g. "hardhat", "arbitrumSepolia", "arbitrum")
-const ENV = "arbitrumSepolia";
+const ENV = "arbitrum";
 
 export const APP_CONFIG = configs[ENV];

@@ -17,11 +17,19 @@ export default defineConfig({
     //   },
     // },
 
-    arbitrumSepolia: {
+    // arbitrumSepolia: {
+    //   type: "http",
+    //   chainType: "generic",
+    //   chainId: 421614,
+    //   url: process.env.ARBITRUM_SEPOLIA_RPC!,
+    //   accounts: [process.env.PRIVATE_KEY!],
+    // },
+
+    arbitrum: {
       type: "http",
       chainType: "generic",
-      chainId: 421614,
-      url: process.env.ARBITRUM_SEPOLIA_RPC!,
+      chainId: 42161,
+      url: process.env.ARBITRUM_RPC!,
       accounts: [process.env.PRIVATE_KEY!],
     },
   },
