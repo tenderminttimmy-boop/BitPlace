@@ -1079,6 +1079,7 @@ function App() {
     if (!isAppVisible) return;
 
     let cancelled = false;
+
     let isSyncing = false;
 
     const intervalId = window.setInterval(async () => {
