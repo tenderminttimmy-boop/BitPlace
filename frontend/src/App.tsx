@@ -1491,6 +1491,7 @@ function App() {
           {pendingPaints.length > 0 && (
             <div className="hud-center">
               <button
+                title="Submit all paints on chain"
                 className={`hud-button hud-submit-button ${
                   stagedBatchMode === "paid"
                     ? "hud-submit-button--paid"
@@ -1623,6 +1624,11 @@ function App() {
 
         {isPickerOpen && popupPosition && (
           <div
+            onMouseDownCapture={() => {
+              if (isEyedropperActive) {
+                setIsEyedropperActive(false);
+              }
+            }}
             style={{
               position: "absolute",
               overflow: "visible",
@@ -1665,6 +1671,7 @@ function App() {
               }}
             >
               <button
+                title="Grab existing cell colors"
                 className={`utility-button${isEyedropperActive ? " active-tool" : ""}`}
                 onClick={() =>
                   !isPainting && setIsEyedropperActive(!isEyedropperActive)
@@ -1680,6 +1687,7 @@ function App() {
 
               <button
                 className="utility-button"
+                title="Submit this + all pending paints on chain"
                 style={{
                   flex: 1,
                   backgroundColor: submitButtonColor,
@@ -1694,9 +1702,10 @@ function App() {
 
               <button
                 className="utility-button"
+                title="Accept and keep painting"
                 style={{
-                  backgroundColor: "#ebc32f",
-                  opacity: canStageCurrentPaint ? 1 : 0.4,
+                  backgroundColor: "#f9c321",
+                  opacity: canStageCurrentPaint ? 1 : 0.6,
                   cursor: canStageCurrentPaint ? "pointer" : "default",
                 }}
                 onClick={handleStagePaint}
