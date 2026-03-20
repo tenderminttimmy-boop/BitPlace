@@ -38,6 +38,7 @@ const ABI = [
   "function paidPaintFeeWei() view returns (uint256)",
   "function adminPainters(address) view returns (bool)",
   "event PixelPainted(address indexed painter, uint16 indexed x, uint16 indexed y, uint24 color)",
+  "event LotteryWon(address indexed winner, uint256 winnerAmount, uint256 feeRecipientAmount)",
 ];
 
 async function loadFullBoardFromContract(): Promise<(string | null)[][]> {
@@ -355,6 +356,13 @@ function getBatchPaintMode(
   return null;
 }
 
+function formatEthAmount(weiAmount: bigint): string {
+  return ethers
+    .formatEther(weiAmount)
+    .replace(/(\.\d{4})\d+$/, "$1")
+    .replace(/\.?0+$/, "");
+}
+
 async function fetchPixelPaintedEventsSince(
   fromBlock: number,
 ): Promise<PixelPaintSyncResult> {
@@ -446,6 +454,9 @@ function App() {
   });
   const [isPaintNoticeVisible, setIsPaintNoticeVisible] = useState(false);
   const [isPaintNoticeMounted, setIsPaintNoticeMounted] = useState(false);
+  const [lotteryNoticeMessage, setLotteryNoticeMessage] = useState("");
+  const [isLotteryNoticeVisible, setIsLotteryNoticeVisible] = useState(false);
+  const [isLotteryNoticeMounted, setIsLotteryNoticeMounted] = useState(false);
 
   const [camera, setCamera] = useState(() => {
     const initialZoom = getMinZoom(window.innerWidth, window.innerHeight) * 1.3;
@@ -660,6 +671,60 @@ function App() {
       window.clearTimeout(hideTimeout);
     };
   }, [paintTxState.phase, isPaintNoticeMounted]);
+
+  useEffect(() => {
+    let raf1 = 0;
+    let raf2 = 0;
+    let showTimeout = 0;
+    let hideTimeout = 0;
+    let unmountTimeout = 0;
+
+    if (!lotteryNoticeMessage) {
+      if (isLotteryNoticeMounted) {
+        setIsLotteryNoticeVisible(false);
+
+        unmountTimeout = window.setTimeout(() => {
+          setIsLotteryNoticeMounted(false);
+        }, 180);
+      }
+
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+        window.clearTimeout(showTimeout);
+        window.clearTimeout(hideTimeout);
+        window.clearTimeout(unmountTimeout);
+      };
+    }
+
+    showTimeout = window.setTimeout(() => {
+      setIsLotteryNoticeMounted(true);
+      setIsLotteryNoticeVisible(false);
+
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => {
+          setIsLotteryNoticeVisible(true);
+        });
+      });
+
+      hideTimeout = window.setTimeout(() => {
+        setIsLotteryNoticeVisible(false);
+
+        unmountTimeout = window.setTimeout(() => {
+          setIsLotteryNoticeMounted(false);
+          setLotteryNoticeMessage("");
+        }, 180);
+      }, 10000);
+    }, 1500);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(showTimeout);
+      window.clearTimeout(hideTimeout);
+      window.clearTimeout(unmountTimeout);
+    };
+  }, [lotteryNoticeMessage, isLotteryNoticeMounted]);
 
   const getDisplayedCellColor = useCallback(
     (x: number, y: number) => {
@@ -1142,6 +1207,21 @@ function App() {
 
       if (!receipt || receipt.status !== 1) {
         throw new Error("Paint transaction failed");
+      }
+
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = contract.interface.parseLog(log);
+
+          if (parsedLog?.name === "LotteryWon") {
+            setLotteryNoticeMessage(
+              `You won the lottery! You received ${formatEthAmount(parsedLog.args.winnerAmount)} ETH.`,
+            );
+            break;
+          }
+        } catch {
+          // Ignore logs from unrelated contracts.
+        }
       }
 
       setBoard((prevBoard) => {
@@ -1728,6 +1808,20 @@ function App() {
             aria-live="polite"
           >
             {paintTxState.phase !== "idle" ? paintTxState.message : ""}
+          </div>
+        )}
+
+        {isLotteryNoticeMounted && (
+          <div
+            className={`paint-notice paint-notice--lottery ${
+              isLotteryNoticeVisible
+                ? "paint-notice--visible"
+                : "paint-notice--hidden"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {lotteryNoticeMessage}
           </div>
         )}
 

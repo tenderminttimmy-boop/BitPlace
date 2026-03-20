@@ -20,3 +20,9 @@ Then a secondary motivation was making things like UI/UX feel somewhat polished 
 ### Why aren't there more user-friendly painting tools, like on other pixel boards?
 
 Again, just because this isn't meant to be a serious long-term project in any capacity. **However**, if this somehow gains some usage, I would be open to updating it further.
+
+### Where is the contract and repo? I want to roast you.
+
+Fair.
+Arbitrum One Mainnet: 0xB22680671f6b2dFDd83b41229cb87C14e9de7754
+Github: https://github.com/tenderminttimmy-boop/BitPlace
