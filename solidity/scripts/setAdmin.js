@@ -9,7 +9,7 @@ async function main() {
 
   const { ethers } = await hre.network.connect();
 
-  const provider = new ethers.JsonRpcProvider(process.env.ARBITRUM_SEPOLIA_RPC);
+  const provider = new ethers.JsonRpcProvider(process.env.ARBITRUM_RPC);
   const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
 
   console.log("Using account:", await signer.getAddress());
